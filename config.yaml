@@ -1,0 +1,156 @@
+# Painel de Producao Industrial - configuracao
+# Nada aqui deve estar cravado no codigo.
+
+caminhos:
+  entrada: "dados/entrada"
+  banco: "dados/producao.db"
+  saida: "saida"
+  logs: "logs"
+
+log:
+  nivel: "INFO"          # DEBUG, INFO, WARNING, ERROR
+  arquivo: "execucao.log"
+
+# ---------------------------------------------------------------
+# Gerador de dados sinteticos
+# ---------------------------------------------------------------
+gerador:
+  semente: 42            # semente fixa = execucao reproduzivel
+  arquivos: 3
+  meses: 6
+  ordens_por_mes: 120
+  taxa_sujeira: 0.18     # fracao das linhas que recebe alguma inconsistencia
+
+  # Clientes anonimizados por codigo, como se faz ao compartilhar dado de
+  # producao fora da empresa. Nenhum nome inventado, nenhuma empresa real.
+  clientes:
+    - "CLI-001"
+    - "CLI-002"
+    - "CLI-003"
+    - "CLI-004"
+    - "CLI-005"
+    - "CLI-006"
+    - "CLI-007"
+    - "CLI-008"
+    - "CLI-009"
+    - "CLI-010"
+    - "CLI-011"
+    - "CLI-012"
+    - "CLI-013"
+    - "CLI-014"
+
+  # Produtos com especificacao, como aparece numa OS de verdade
+  produtos:
+    - "Folder A4 4x4 couche 150g"
+    - "Catalogo 16pg lombada canoa"
+    - "Cartao de visita 4x4 laminado fosco"
+    - "Etiqueta adesiva BOPP em rolo"
+    - "Caixa cartonada duplex 300g"
+    - "Manual tecnico 32pg 1x1"
+    - "Bloco de pedido 2 vias autocopiativo"
+    - "Cartaz A2 4x0 couche 170g"
+    - "Revista institucional 24pg"
+    - "Rotulo termoencolhivel"
+    - "Pasta com bolsa 4x0 triplex"
+    - "Talao de nota fiscal 3 vias"
+
+  # Operadores por matricula: identifica sem expor dado de pessoa.
+  operadores:
+    - "OP-01"
+    - "OP-02"
+    - "OP-03"
+    - "OP-04"
+    - "OP-05"
+    - "OP-06"
+    - "OP-07"
+    - "OP-08"
+    - "OP-09"
+    - "OP-10"
+
+# ---------------------------------------------------------------
+# Leitura: apelidos aceitos para cada coluna
+# ---------------------------------------------------------------
+colunas:
+  numero_os:          ["OS", "N OS", "NUMERO OS", "ORDEM"]
+  cliente:            ["CLIENTE", "COD CLIENTE"]
+  produto:            ["PRODUTO", "DESCRICAO", "ITEM"]
+  maquina:            ["MAQUINA", "EQUIPAMENTO", "IMPRESSORA"]
+  operador:           ["OPERADOR", "MATRICULA"]
+  turno:              ["TURNO"]
+  data_entrada:       ["DATA ENTRADA", "ENTRADA", "DT ENTRADA"]
+  data_prazo:         ["PRAZO", "DATA PRAZO", "PREVISAO"]
+  data_entrega:       ["DATA ENTREGA", "ENTREGA", "DT ENTREGA"]
+  tiragem_prevista:   ["TIRAGEM PREVISTA", "TIRAGEM", "QTD PREVISTA"]
+  tiragem_boa:        ["TIRAGEM BOA", "QTD BOA", "PRODUZIDO"]
+  refugo:             ["REFUGO", "PERDA", "SOBRA"]
+  tempo_setup_min:    ["SETUP (MIN)", "SETUP", "TEMPO SETUP"]
+  tempo_producao_min: ["PRODUCAO (MIN)", "TEMPO PRODUCAO", "TEMPO MAQUINA"]
+
+linhas_busca_cabecalho: 12
+
+# ---------------------------------------------------------------
+# Normalizacao de nomes de maquina
+# chave = nome canonico | valores = variantes do chao de fabrica
+# ---------------------------------------------------------------
+maquinas:
+  "Heidelberg SM52":
+    ["heidelberg sm52", "heidelberg sm-52", "heid sm52", "sm 52", "hd sm52"]
+  "Heidelberg SM74":
+    ["heidelberg sm74", "heidelberg sm-74", "sm 74", "hd sm74"]
+  "Komori Lithrone 28":
+    ["komori lithrone", "komori 28", "lithrone 28", "komori l28"]
+  "Xerox Versant 180":
+    ["xerox versant", "versant 180", "xerox 180", "versant"]
+  "Polar 115 (Guilhotina)":
+    ["polar 115", "guilhotina polar", "polar", "guilhotina"]
+  "Stahl KH66 (Dobradeira)":
+    ["stahl kh66", "dobradeira stahl", "stahl", "dobradeira"]
+
+turnos:
+  "1": ["1", "1o", "primeiro", "manha", "a"]
+  "2": ["2", "2o", "segundo", "tarde", "b"]
+  "3": ["3", "3o", "terceiro", "noite", "c"]
+
+# ---------------------------------------------------------------
+# Validacao
+# ---------------------------------------------------------------
+validacao:
+  obrigatorios: ["numero_os", "maquina", "data_entrada"]
+  refugo_maximo_sobre_tiragem: 0.5   # refugo acima de 50% da tiragem = rejeitado
+  tempo_maximo_minutos: 2880         # 48h numa unica ordem = suspeito
+  taxa_rejeicao_limite: 0.10         # acima disso o programa sai com codigo 1
+
+# ---------------------------------------------------------------
+# Metas dos indicadores
+# ---------------------------------------------------------------
+metas:
+  refugo_maximo_pct: 3.0
+  otd_minimo_pct: 95.0
+  setup_maximo_min: 40.0
+  aproveitamento_minimo_pct: 80.0
+# Meta de produtividade por maquina, em folhas boas por hora.
+# Serve para comparar a MESMA maquina ao longo do tempo.
+# Comparar maquinas diferentes entre si com este indicador nao e valido.
+metas_produtividade:
+  "Heidelberg SM52": 9000
+  "Heidelberg SM74": 11000
+  "Komori Lithrone 28": 12000
+  "Xerox Versant 180": 4500
+  "Polar 115 (Guilhotina)": 20000
+  "Stahl KH66 (Dobradeira)": 8000
+
+# ---------------------------------------------------------------
+# Painel
+# ---------------------------------------------------------------
+painel:
+  titulo: "Painel de Producao Industrial"
+  arquivo: "painel.html"
+  cores:
+    fundo: "#060a0c"
+    cartao: "#0c1519"
+    verde: "#29e07f"
+    verde_medio: "#1f8f4e"
+    vermelho: "#e05a5a"
+    texto: "#e7efea"
+    texto_fraco: "#8fa79c"
+  top_atrasos: 10
