@@ -19,6 +19,7 @@ from src.config import carregar
 from src.limpeza import (
     BASE_SERIAL_EXCEL,
     FAIXA_ANOS_SERIAL,
+    TIPO_NUMERICO_POR_COLUNA,
     chave_comparacao,
     converter_data,
     converter_numero,
@@ -300,7 +301,7 @@ def test_converter_data_booleano_e_recusado():
     ],
 )
 def test_converter_numero_formatos_da_especificacao(entrada, esperado):
-    resultado = converter_numero(entrada)
+    resultado = converter_numero(entrada, int)
     assert resultado.valor == esperado
     assert isinstance(resultado.valor, int)
 
@@ -311,54 +312,97 @@ def test_converter_numero_formatos_da_especificacao(entrada, esperado):
      ("1,234.56", 1234.56), (41.6, 41.6)],
 )
 def test_converter_numero_com_casa_decimal(entrada, esperado):
-    assert converter_numero(entrada).valor == pytest.approx(esperado)
+    resultado = converter_numero(entrada, float)
+    assert resultado.valor == pytest.approx(esperado)
+    assert isinstance(resultado.valor, float)
 
 
-def test_converter_numero_ponto_com_tres_digitos_e_milhar():
-    # '5.000' e cinco mil na planilha brasileira, nao cinco com tres decimais.
-    assert converter_numero("5.000").valor == 5000
+def test_converter_numero_coluna_inteira_nao_tem_ambiguidade_de_separador():
+    # Numa contagem, separador seguido de tres digitos e sempre milhar, sem
+    # depender de quantos digitos vem antes. Era o furo da heuristica anterior.
+    assert converter_numero("1234.567", int).valor == 1234567
+    assert converter_numero("1234,567", int).valor == 1234567
+    assert converter_numero("5.000", int).valor == 5000
+    assert converter_numero("5,000", int).valor == 5000
 
 
-def test_converter_numero_ponto_com_dois_digitos_e_decimal():
-    assert converter_numero("5.00").valor == 5
+def test_converter_numero_coluna_decimal_mantem_a_leitura_decimal():
+    # A mesma cadeia numa coluna de tempo continua sendo decimal: la o valor
+    # pode legitimamente ter casa decimal.
+    assert converter_numero("1234.567", float).valor == pytest.approx(1234.567)
+
+
+def test_converter_numero_coluna_inteira_recusa_casa_decimal():
+    # '41.6' numa contagem nao vira 416 nem 42: vira ocorrencia no relatorio.
+    resultado = converter_numero("41.6", int)
+    assert resultado.valor is None
+    assert "contagem inteira" in resultado.problema
+    assert "41.6" in resultado.problema
+
+
+def test_converter_numero_coluna_inteira_recusa_float_fracionario():
+    assert converter_numero(41.6, int).problema is not None
+    assert converter_numero(41.0, int).valor == 41
+
+
+def test_converter_numero_ponto_com_dois_digitos_e_decimal_no_tempo():
+    assert converter_numero("5.00", float).valor == pytest.approx(5.0)
+
+
+def test_converter_numero_tipo_invalido_e_erro_de_programacao():
+    # Nao e dado sujo, e chamada errada: quebra alto em vez de virar ocorrencia.
+    with pytest.raises(ValueError, match="int ou float"):
+        converter_numero("5000", str)
 
 
 def test_converter_numero_negativo_passa_para_a_validacao():
     # Tempo negativo e impossivel, mas quem recusa e o Bloco 5. A limpeza so
     # converte - recusar aqui esconderia a ocorrencia do relatorio.
-    assert converter_numero("-53,5").valor == pytest.approx(-53.5)
-    assert converter_numero(-53.5).problema is None
+    assert converter_numero("-53,5", float).valor == pytest.approx(-53.5)
+    assert converter_numero(-53.5, float).problema is None
 
 
 @pytest.mark.parametrize("vazio", [None, "", "   "])
 def test_converter_numero_vazio_nao_e_problema(vazio):
-    resultado = converter_numero(vazio)
+    resultado = converter_numero(vazio, int)
     assert resultado.valor is None
     assert resultado.problema is None
 
 
 @pytest.mark.parametrize("entrada", ["abc", "5.000abc", "--5", "R$ 5.000"])
 def test_converter_numero_invalido_diz_o_valor_e_o_que_sobrou(entrada):
-    resultado = converter_numero(entrada)
+    resultado = converter_numero(entrada, int)
     assert resultado.valor is None
     assert entrada in resultado.problema
 
 
 def test_converter_numero_booleano_e_recusado():
     # True e instancia de int em Python: sem a guarda viraria 1 silenciosamente.
-    assert converter_numero(True).problema is not None
+    assert converter_numero(True, int).problema is not None
 
 
 def test_converter_numero_data_em_coluna_numerica_e_recusada():
-    assert converter_numero(datetime(2026, 3, 5)).problema is not None
+    assert converter_numero(datetime(2026, 3, 5), int).problema is not None
 
 
 def test_converter_numero_sem_mudanca_nao_reporta_correcao():
-    assert converter_numero(5000).correcao is None
+    assert converter_numero(5000, int).correcao is None
 
 
 def test_converter_numero_texto_convertido_reporta_correcao():
-    assert converter_numero("5.000").correcao is not None
+    assert converter_numero("5.000", int).correcao is not None
+
+
+def test_tipo_por_coluna_cobre_as_colunas_numericas_do_config():
+    """
+    O mapa de tipos e o nome canonico das colunas precisam andar juntos. Se
+    alguem renomear 'tiragem_boa' no config sem ajustar o mapa, e aqui que cai.
+    """
+    cfg = carregar()
+    for coluna in TIPO_NUMERICO_POR_COLUNA:
+        assert coluna in cfg.colunas, f"{coluna!r} saiu da secao 'colunas' do config"
+    assert TIPO_NUMERICO_POR_COLUNA["tiragem_prevista"] is int
+    assert TIPO_NUMERICO_POR_COLUNA["tempo_setup_min"] is float
 
 
 # ---------------------------------------------------------------------------

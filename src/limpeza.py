@@ -58,6 +58,22 @@ FORMATOS_DATA = (
 # '5-mar-26', '5-marco-2026', '15-DEZ-25'.
 PADRAO_DATA_ABREVIADA = re.compile(r"^(\d{1,2})-([a-z]+)-(\d{2,4})$")
 
+# Tipo numerico que cada coluna espera, espelhando o esquema do banco da secao
+# 4.3: tiragem e refugo sao INTEGER, tempo e REAL.
+#
+# Nao esta no config.yaml de proposito. O que a fabrica renomeia e o nome da
+# coluna NA PLANILHA, e isso ja e configuravel pelos apelidos em 'colunas'. A
+# chave aqui e o nome canonico interno, que e contrato entre os modulos e muda
+# junto com o esquema do banco - se um dia mudar, o teste de cobertura no
+# tests/test_limpeza.py acusa.
+TIPO_NUMERICO_POR_COLUNA: dict[str, type] = {
+    "tiragem_prevista": int,
+    "tiragem_boa": int,
+    "refugo": int,
+    "tempo_setup_min": float,
+    "tempo_producao_min": float,
+}
+
 
 @dataclass(frozen=True)
 class ValorLimpo:
@@ -354,17 +370,37 @@ def converter_data(valor: Any) -> ValorLimpo:
     )
 
 
-def _inteiro_se_possivel(numero: float) -> int | float:
-    """Devolve int quando o numero nao tem parte fracionaria."""
-    return int(numero) if float(numero).is_integer() else float(numero)
+def _no_tipo_pedido(
+    numero: float, original: Any, tipo: type, correcao: str | None
+) -> ValorLimpo:
+    """
+    Entrega o numero no tipo que a coluna declarou.
+
+    Casa decimal numa coluna de contagem e recusada, nao arredondada: 5000,5
+    folhas nao existe, e arredondar em silencio trocaria o dado errado por um
+    dado plausivel que ninguem mais conseguiria auditar.
+    """
+    if tipo is int:
+        if not float(numero).is_integer():
+            return ValorLimpo(
+                None,
+                problema=(
+                    f"numero {original!r}: a coluna e de contagem inteira e o valor "
+                    f"tem casa decimal ({numero})"
+                ),
+            )
+        return ValorLimpo(int(numero), correcao=correcao)
+    return ValorLimpo(float(numero), correcao=correcao)
 
 
-def _desfazer_separadores(texto: str) -> str:
+def _desfazer_separadores(texto: str, tipo: type) -> str:
     """
     Reduz o numero digitado a uma forma que float() entende.
 
     O espaco sai sempre - so serve como separador de milhar. Depois, cada
-    separador restante e classificado como milhar ou decimal.
+    separador restante e classificado como milhar ou decimal, e e aqui que o
+    tipo esperado da coluna faz diferenca: numa contagem inteira nao ha
+    ambiguidade a resolver, porque contagem nao tem casa decimal.
     """
     limpo = re.sub(r"\s+", "", texto.replace("\xa0", " "))
 
@@ -380,32 +416,60 @@ def _desfazer_separadores(texto: str) -> str:
             return limpo.replace(".", "").replace(",", ".")
         return limpo.replace(",", "")
 
-    if "," in limpo:
+    separador = "," if "," in limpo else ("." if "." in limpo else "")
+    if not separador:
+        return limpo
+
+    depois = limpo.partition(separador)[2]
+
+    if tipo is int:
+        # Coluna de contagem: ponto e virgula sao sempre milhar, sem chute sobre
+        # quantos digitos vem antes - '1234.567' e um milhao e duzentos mil, nao
+        # mil duzentos e trinta e quatro virgula. O unico requisito e o grupo de
+        # tres digitos, que e o que define um separador de milhar.
+        if len(depois) == 3:
+            return limpo.replace(separador, "")
+        # Separador que nao forma grupo de tres nao e milhar. Em vez de apagar e
+        # inventar outro numero ('41.6' viraria 416), deixa como decimal: a
+        # conversao recusa por nao ser inteiro e o valor vai para o relatorio.
+        return limpo.replace(",", ".")
+
+    if separador == ",":
         # Virgula sozinha e decimal em pt-BR: '5000,0' e cinco mil.
         return limpo.replace(",", ".")
 
-    if "." in limpo:
-        # Ponto sozinho e ambiguo. '5.000' e cinco mil na planilha brasileira,
-        # e nao cinco com tres decimais - tiragem nao tem casa decimal. O
-        # criterio: ate tres digitos antes e exatamente tres depois e milhar.
-        antes, _, depois = limpo.partition(".")
-        digitos_antes = antes.lstrip("+-")
-        if len(depois) == 3 and 1 <= len(digitos_antes) <= 3 and digitos_antes.isdigit():
-            return limpo.replace(".", "")
-
+    # Coluna decimal com ponto sozinho: aqui a ambiguidade e real, porque o
+    # valor pode legitimamente ter casa decimal. Ate tres digitos antes e
+    # exatamente tres depois e milhar.
+    antes = limpo.partition(".")[0].lstrip("+-")
+    if len(depois) == 3 and 1 <= len(antes) <= 3 and antes.isdigit():
+        return limpo.replace(".", "")
     return limpo
 
 
-def converter_numero(valor: Any) -> ValorLimpo:
+def converter_numero(valor: Any, tipo: type) -> ValorLimpo:
     """
     Converte para numero o que a planilha entrega como quantidade ou tempo.
 
     Aceita int e float direto, e texto com separador de milhar por ponto
     ('5.000'), por espaco ('5 000') e com virgula decimal ('5000,0').
 
-    Devolve int quando o valor nao tem parte fracionaria, para tiragem e refugo
-    nao chegarem ao banco como 5000.0.
+    `tipo` e o que a coluna espera, int ou float, e vem de
+    TIPO_NUMERICO_POR_COLUNA. Nao tem valor padrao de proposito: e justamente
+    esse contexto que elimina a adivinhacao sobre o separador. Numa coluna de
+    contagem, ponto e sempre milhar; a ambiguidade so sobra onde a coluna
+    legitimamente aceita decimal.
+
+    O retorno respeita o tipo pedido: int para contagem, float para tempo. Valor
+    com casa decimal numa coluna de contagem vira problema, nao arredondamento -
+    arredondar em silencio esconderia o dado errado.
     """
+    if tipo not in (int, float):
+        raise ValueError(
+            f"converter_numero: 'tipo' precisa ser int ou float, recebido {tipo!r}. "
+            f"Use TIPO_NUMERICO_POR_COLUNA para descobrir o da coluna"
+        )
+
     if valor is None:
         return ValorLimpo(None)
 
@@ -417,7 +481,7 @@ def converter_numero(valor: Any) -> ValorLimpo:
     if isinstance(valor, (int, float)):
         if valor != valor or valor in (float("inf"), float("-inf")):
             return ValorLimpo(None, problema=f"numero {valor!r} nao e finito")
-        return ValorLimpo(_inteiro_se_possivel(valor))
+        return _no_tipo_pedido(valor, valor, tipo, correcao=None)
 
     # datetime e subclasse de date, entao esta checagem cobre os dois.
     if isinstance(valor, date):
@@ -436,7 +500,7 @@ def converter_numero(valor: Any) -> ValorLimpo:
     if not texto:
         return ValorLimpo(None)
 
-    candidato = _desfazer_separadores(texto)
+    candidato = _desfazer_separadores(texto, tipo)
     try:
         numero = float(candidato)
     except ValueError:
@@ -451,6 +515,6 @@ def converter_numero(valor: Any) -> ValorLimpo:
     if numero != numero or numero in (float("inf"), float("-inf")):
         return ValorLimpo(None, problema=f"numero {valor!r} nao e finito")
 
-    return ValorLimpo(
-        _inteiro_se_possivel(numero), correcao=f"numero em texto {valor!r} convertido"
+    return _no_tipo_pedido(
+        numero, valor, tipo, correcao=f"numero em texto {valor!r} convertido"
     )
