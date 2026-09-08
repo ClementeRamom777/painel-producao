@@ -50,6 +50,34 @@ CHAVES_OBRIGATORIAS: tuple[tuple[str, tuple[type, ...]], ...] = (
     ("gerador.produtos", (list,)),
     ("gerador.operadores", (list,)),
 
+    # A tiragem depende do produto, nao da maquina: e o pedido do cliente que
+    # define o tamanho da tiragem; a maquina so determina em quanto tempo sai.
+    ("gerador.tiragem_por_produto", (dict,)),
+    ("gerador.maquinas_digitais", (list,)),
+    ("gerador.tiragem_maxima_digital", (int,)),
+    ("gerador.peso_digital_tiragem_curta", (int,)),
+    ("gerador.setup_por_maquina", (dict,)),
+    ("gerador.refugo_por_maquina", (dict,)),
+
+    ("gerador.atrasos", (dict,)),
+    ("gerador.atrasos.otd_alvo_pct", (int, float)),
+    ("gerador.atrasos.dias_atraso", (list,)),
+    ("gerador.atrasos.concentracao", (dict,)),
+    ("gerador.atrasos.concentracao.maquina", (str,)),
+    ("gerador.atrasos.concentracao.mes", (str,)),
+    ("gerador.atrasos.concentracao.otd_pct", (int, float)),
+
+    ("gerador.fechamento_tiragem", (dict,)),
+    ("gerador.fechamento_tiragem.sobra_maxima_pct", (int, float)),
+    ("gerador.fechamento_tiragem.prob_abaixo_do_pedido", (int, float)),
+    ("gerador.fechamento_tiragem.falta_maxima_pct", (int, float)),
+    ("gerador.fechamento_tiragem.prob_exato", (int, float)),
+
+    ("gerador.status", (dict,)),
+    ("gerador.status.dias_janela_em_producao", (int,)),
+    ("gerador.status.prob_em_producao", (int, float)),
+    ("gerador.status.prob_cancelada", (int, float)),
+
     ("colunas", (dict,)),
     ("colunas.numero_os", (list,)),
     ("colunas.cliente", (list,)),
@@ -60,6 +88,7 @@ CHAVES_OBRIGATORIAS: tuple[tuple[str, tuple[type, ...]], ...] = (
     ("colunas.data_entrada", (list,)),
     ("colunas.data_prazo", (list,)),
     ("colunas.data_entrega", (list,)),
+    ("colunas.status", (list,)),
     ("colunas.tiragem_prevista", (list,)),
     ("colunas.tiragem_boa", (list,)),
     ("colunas.refugo", (list,)),
@@ -70,6 +99,7 @@ CHAVES_OBRIGATORIAS: tuple[tuple[str, tuple[type, ...]], ...] = (
 
     ("maquinas", (dict,)),
     ("turnos", (dict,)),
+    ("status", (dict,)),
 
     ("validacao", (dict,)),
     ("validacao.obrigatorios", (list,)),
@@ -82,6 +112,10 @@ CHAVES_OBRIGATORIAS: tuple[tuple[str, tuple[type, ...]], ...] = (
     ("metas.otd_minimo_pct", (int, float)),
     ("metas.setup_maximo_min", (int, float)),
     ("metas.aproveitamento_minimo_pct", (int, float)),
+    # O cartao global de produtividade nao mostra media de folhas/hora - media
+    # entre guilhotina e digital nao tem meta que signifique nada. Mostra
+    # "X de N maquinas na meta", e este e o percentual que pinta o cartao.
+    ("metas.maquinas_na_meta_minimo_pct", (int, float)),
 
     # Meta de produtividade e por maquina, nao global: folha boa por hora nao
     # e comparavel entre equipamentos de portes diferentes. As chaves sao os
@@ -189,15 +223,174 @@ def _validar_chaves(dados: dict) -> list[str]:
     return problemas
 
 
-def _validar_valores(dados: dict) -> list[str]:
+def _validar_cobertura(
+    nome_secao: str,
+    chaves_secao,
+    nome_referencia: str,
+    chaves_referencia,
+) -> list[str]:
     """
-    Confere os valores que tem faixa ou dominio conhecido.
+    Confere que uma secao cobre exatamente as chaves de outra.
+
+    Os dois sentidos importam. Item da referencia sem entrada aqui fica sem
+    parametro; entrada com o nome digitado diferente nunca alcanca item nenhum.
+    Nos dois casos o efeito e silencioso: o gerador ou o painel simplesmente
+    ignoram aquele item, sem erro.
+    """
+    problemas = []
+    faltando = set(chaves_referencia) - set(chaves_secao)
+    sobrando = set(chaves_secao) - set(chaves_referencia)
+
+    for chave in sorted(faltando, key=str):
+        problemas.append(
+            f"chave '{nome_secao}': {chave!r} existe em '{nome_referencia}' mas nao "
+            f"tem entrada aqui"
+        )
+    for chave in sorted(sobrando, key=str):
+        problemas.append(
+            f"chave '{nome_secao}': {chave!r} nao existe em '{nome_referencia}'. "
+            f"Validos: {', '.join(sorted((str(c) for c in chaves_referencia)))}"
+        )
+    return problemas
+
+
+def _validar_faixas(
+    nome_secao: str,
+    faixas: dict,
+    minimo_permitido: float,
+    maximo_permitido: float,
+) -> list[str]:
+    """Confere pares [minimo, maximo] de uma secao inteira do config."""
+    problemas = []
+    for chave, faixa in faixas.items():
+        rotulo = f"chave '{nome_secao}.{chave}'"
+
+        if not isinstance(faixa, list) or len(faixa) != 2:
+            problemas.append(
+                f"{rotulo}: esperado uma lista [minimo, maximo], veio {faixa!r}"
+            )
+            continue
+
+        inicio, fim = faixa
+        if not (_tipo_aceito(inicio, (int, float)) and _tipo_aceito(fim, (int, float))):
+            problemas.append(
+                f"{rotulo}: os dois limites precisam ser numeros, veio {faixa!r}"
+            )
+            continue
+
+        if inicio > fim:
+            problemas.append(
+                f"{rotulo}: minimo {inicio!r} e maior que o maximo {fim!r}"
+            )
+        if inicio < minimo_permitido or fim > maximo_permitido:
+            problemas.append(
+                f"{rotulo}: {faixa!r} fora dos limites aceitos "
+                f"[{minimo_permitido}, {maximo_permitido}]"
+            )
+    return problemas
+
+
+def _validar_cruzamentos(dados: dict) -> list[str]:
+    """
+    Confere que as secoes que se referenciam por nome estao em sincronia.
+
+    Toda vez que uma chave do config e o nome de algo declarado em outra secao,
+    um erro de digitacao produz silencio em vez de erro. Este e o unico lugar
+    que pega isso.
+    """
+    problemas: list[str] = []
+    gerador = dados["gerador"]
+
+    # Coluna marcada como obrigatoria precisa ser coluna que a leitura conhece,
+    # senao a regra de validacao nunca dispara. Aqui o cruzamento e de sentido
+    # unico: coluna que nao e obrigatoria e o caso normal, nao um problema.
+    for campo in sorted(set(dados["validacao"]["obrigatorios"]) - set(dados["colunas"]), key=str):
+        problemas.append(
+            f"chave 'validacao.obrigatorios': {campo!r} nao existe em 'colunas'. "
+            f"Disponiveis: {', '.join(sorted(dados['colunas']))}"
+        )
+
+    # O mesmo apelido em duas colunas deixa a leitura sem criterio para decidir
+    # de quem e a coluna 'TIRAGEM' da planilha. Escolher uma seria arbitrario e
+    # silencioso, entao o carregamento recusa.
+    dono_do_apelido: dict[str, str] = {}
+    for campo, apelidos in dados["colunas"].items():
+        for apelido in apelidos:
+            chave = " ".join(str(apelido).upper().split())
+            if chave in dono_do_apelido:
+                problemas.append(
+                    f"chave 'colunas': o apelido {apelido!r} esta em "
+                    f"{dono_do_apelido[chave]!r} e tambem em {campo!r}. "
+                    f"A leitura nao teria como decidir de quem e a coluna"
+                )
+            else:
+                dono_do_apelido[chave] = campo
+
+    problemas += _validar_cobertura(
+        "metas_produtividade", dados["metas_produtividade"], "maquinas", dados["maquinas"]
+    )
+    problemas += _validar_cobertura(
+        "gerador.setup_por_maquina", gerador["setup_por_maquina"], "maquinas", dados["maquinas"]
+    )
+    problemas += _validar_cobertura(
+        "gerador.refugo_por_maquina", gerador["refugo_por_maquina"], "maquinas", dados["maquinas"]
+    )
+    problemas += _validar_cobertura(
+        "gerador.tiragem_por_produto", gerador["tiragem_por_produto"],
+        "gerador.produtos", gerador["produtos"],
+    )
+
+    for maquina in gerador["maquinas_digitais"]:
+        if maquina not in dados["maquinas"]:
+            problemas.append(
+                f"chave 'gerador.maquinas_digitais': {maquina!r} nao e nome canonico "
+                f"em 'maquinas'. Canonicos: {', '.join(sorted(dados['maquinas']))}"
+            )
+    if len(gerador["maquinas_digitais"]) >= len(dados["maquinas"]):
+        problemas.append(
+            f"chave 'gerador.maquinas_digitais': {len(gerador['maquinas_digitais'])} de "
+            f"{len(dados['maquinas'])} maquinas sao digitais, entao nao sobra offset para "
+            f"tiragem acima de 'tiragem_maxima_digital' e nenhuma ordem longa teria onde rodar"
+        )
+
+    # As tres fatias do fechamento saem de um sorteio so, entao as duas
+    # declaradas nao podem passar de 100% - a terceira e o que sobra.
+    fechamento = gerador["fechamento_tiragem"]
+    soma_fatias = fechamento["prob_exato"] + fechamento["prob_abaixo_do_pedido"]
+    if soma_fatias > 1:
+        problemas.append(
+            f"chave 'gerador.fechamento_tiragem': prob_exato "
+            f"({fechamento['prob_exato']}) mais prob_abaixo_do_pedido "
+            f"({fechamento['prob_abaixo_do_pedido']}) somam {soma_fatias}, acima de 1. "
+            f"Nao sobraria fatia para a ordem que fecha acima do pedido"
+        )
+
+    concentracao = gerador["atrasos"]["concentracao"]
+    if concentracao["maquina"] not in dados["maquinas"]:
+        problemas.append(
+            f"chave 'gerador.atrasos.concentracao.maquina': {concentracao['maquina']!r} "
+            f"nao e nome canonico em 'maquinas'. "
+            f"Canonicos: {', '.join(sorted(dados['maquinas']))}"
+        )
+    mes = concentracao["mes"]
+    if len(mes) != 7 or mes[4] != "-" or not (mes[:4] + mes[5:]).isdigit():
+        problemas.append(
+            f"chave 'gerador.atrasos.concentracao.mes': {mes!r} nao esta no formato AAAA-MM"
+        )
+
+    return problemas
+
+
+def _validar_escalares(dados: dict) -> list[str]:
+    """
+    Confere os valores soltos que tem faixa ou dominio conhecido.
 
     Presenca e tipo nao bastam: 'taxa_rejeicao_limite: 10' passa como numero
     e significa 1000% de rejeicao, o que desliga a trava da Decisao 2 sem que
     ninguem perceba.
     """
     problemas: list[str] = []
+    gerador = dados["gerador"]
 
     nivel = dados["log"]["nivel"]
     if nivel.upper() not in NIVEIS_LOG_ACEITOS:
@@ -207,7 +400,13 @@ def _validar_valores(dados: dict) -> list[str]:
         )
 
     fracoes = (
-        ("gerador.taxa_sujeira", dados["gerador"]["taxa_sujeira"]),
+        ("gerador.taxa_sujeira", gerador["taxa_sujeira"]),
+        ("gerador.fechamento_tiragem.prob_abaixo_do_pedido",
+         gerador["fechamento_tiragem"]["prob_abaixo_do_pedido"]),
+        ("gerador.fechamento_tiragem.prob_exato",
+         gerador["fechamento_tiragem"]["prob_exato"]),
+        ("gerador.status.prob_em_producao", gerador["status"]["prob_em_producao"]),
+        ("gerador.status.prob_cancelada", gerador["status"]["prob_cancelada"]),
         ("validacao.taxa_rejeicao_limite", dados["validacao"]["taxa_rejeicao_limite"]),
         ("validacao.refugo_maximo_sobre_tiragem",
          dados["validacao"]["refugo_maximo_sobre_tiragem"]),
@@ -219,10 +418,41 @@ def _validar_valores(dados: dict) -> list[str]:
                 f"E uma fracao, precisa estar entre 0 e 1"
             )
 
+    # Meta de percentual e comparada contra indicador na escala 0-100. Um valor
+    # fora dessa faixa pinta o painel inteiro de uma cor so, sem erro nenhum.
+    # A faixa nao pega tudo: 'otd_minimo_pct: 0.95' escrito como fracao continua
+    # sendo um numero valido entre 0 e 100, e nao ha como distinguir isso de uma
+    # meta deliberadamente baixa.
+    percentuais = (
+        ("metas.refugo_maximo_pct", dados["metas"]["refugo_maximo_pct"]),
+        ("metas.otd_minimo_pct", dados["metas"]["otd_minimo_pct"]),
+        ("metas.aproveitamento_minimo_pct", dados["metas"]["aproveitamento_minimo_pct"]),
+        ("metas.maquinas_na_meta_minimo_pct",
+         dados["metas"]["maquinas_na_meta_minimo_pct"]),
+        ("gerador.atrasos.otd_alvo_pct", gerador["atrasos"]["otd_alvo_pct"]),
+        ("gerador.atrasos.concentracao.otd_pct",
+         gerador["atrasos"]["concentracao"]["otd_pct"]),
+        ("gerador.fechamento_tiragem.sobra_maxima_pct",
+         gerador["fechamento_tiragem"]["sobra_maxima_pct"]),
+        ("gerador.fechamento_tiragem.falta_maxima_pct",
+         gerador["fechamento_tiragem"]["falta_maxima_pct"]),
+    )
+    for caminho_chave, valor in percentuais:
+        if not 0 <= valor <= 100:
+            problemas.append(
+                f"chave '{caminho_chave}': valor {valor!r} fora da faixa. "
+                f"E um percentual, precisa estar entre 0 e 100"
+            )
+
     positivos = (
-        ("gerador.arquivos", dados["gerador"]["arquivos"]),
-        ("gerador.meses", dados["gerador"]["meses"]),
-        ("gerador.ordens_por_mes", dados["gerador"]["ordens_por_mes"]),
+        ("gerador.arquivos", gerador["arquivos"]),
+        ("metas.setup_maximo_min", dados["metas"]["setup_maximo_min"]),
+        ("gerador.meses", gerador["meses"]),
+        ("gerador.ordens_por_mes", gerador["ordens_por_mes"]),
+        ("gerador.tiragem_maxima_digital", gerador["tiragem_maxima_digital"]),
+        ("gerador.peso_digital_tiragem_curta", gerador["peso_digital_tiragem_curta"]),
+        ("gerador.status.dias_janela_em_producao",
+         gerador["status"]["dias_janela_em_producao"]),
         ("linhas_busca_cabecalho", dados["linhas_busca_cabecalho"]),
         ("validacao.tempo_maximo_minutos", dados["validacao"]["tempo_maximo_minutos"]),
         ("painel.top_atrasos", dados["painel"]["top_atrasos"]),
@@ -233,38 +463,7 @@ def _validar_valores(dados: dict) -> list[str]:
                 f"chave '{caminho_chave}': valor {valor!r} precisa ser maior que zero"
             )
 
-    # As colunas marcadas como obrigatorias na validacao precisam ser colunas
-    # que a leitura conhece, senao a regra nunca dispara e ninguem descobre.
-    colunas_conhecidas = set(dados["colunas"].keys())
-    for campo in dados["validacao"]["obrigatorios"]:
-        if campo not in colunas_conhecidas:
-            problemas.append(
-                f"chave 'validacao.obrigatorios': {campo!r} nao existe em 'colunas'. "
-                f"Disponiveis: {', '.join(sorted(colunas_conhecidas))}"
-            )
-
-    # Mesma logica de 'validacao.obrigatorios', agora entre 'maquinas' e
-    # 'metas_produtividade'. Os dois sentidos importam: maquina sem meta
-    # aparece no painel sem linha de comparacao, e meta com nome canonico
-    # digitado diferente nunca alcanca maquina nenhuma. Nos dois casos o
-    # painel fica incompleto sem avisar.
-    maquinas_canonicas = set(dados["maquinas"])
-    metas_produtividade = dados["metas_produtividade"]
-
-    for maquina in sorted(maquinas_canonicas - set(metas_produtividade), key=str):
-        problemas.append(
-            f"chave 'metas_produtividade': maquina {maquina!r} existe em 'maquinas' "
-            f"mas nao tem meta de produtividade"
-        )
-
-    for maquina in sorted(set(metas_produtividade) - maquinas_canonicas, key=str):
-        problemas.append(
-            f"chave 'metas_produtividade': meta definida para {maquina!r}, que nao e "
-            f"nome canonico em 'maquinas'. Canonicos: "
-            f"{', '.join(sorted(maquinas_canonicas, key=str))}"
-        )
-
-    for maquina, meta in metas_produtividade.items():
+    for maquina, meta in dados["metas_produtividade"].items():
         if not _tipo_aceito(meta, (int, float)):
             problemas.append(
                 f"chave 'metas_produtividade.{maquina}': esperado "
@@ -277,8 +476,36 @@ def _validar_valores(dados: dict) -> list[str]:
                 f"maior que zero (a meta e em folhas boas por hora)"
             )
 
+    problemas += _validar_faixas(
+        "gerador.tiragem_por_produto", gerador["tiragem_por_produto"], 1, 1_000_000
+    )
+    problemas += _validar_faixas(
+        "gerador.setup_por_maquina", gerador["setup_por_maquina"],
+        0, dados["validacao"]["tempo_maximo_minutos"],
+    )
+    problemas += _validar_faixas(
+        "gerador.refugo_por_maquina", gerador["refugo_por_maquina"], 0, 100
+    )
+    problemas += _validar_faixas(
+        "gerador.atrasos", {"dias_atraso": gerador["atrasos"]["dias_atraso"]}, 1, 3650
+    )
+
     return problemas
 
+
+def _validar_valores(dados: dict) -> list[str]:
+    """Junta as conferencias de valor: escalares soltos, faixas e cruzamentos."""
+    return _validar_escalares(dados) + _validar_cruzamentos(dados)
+
+    # As colunas marcadas como obrigatorias na validacao precisam ser colunas
+    # que a leitura conhece, senao a regra nunca dispara e ninguem descobre.
+    colunas_conhecidas = set(dados["colunas"].keys())
+    for campo in dados["validacao"]["obrigatorios"]:
+        if campo not in colunas_conhecidas:
+            problemas.append(
+                f"chave 'validacao.obrigatorios': {campo!r} nao existe em 'colunas'. "
+                f"Disponiveis: {', '.join(sorted(colunas_conhecidas))}"
+            )
 
 @dataclass(frozen=True)
 class Configuracao:
@@ -299,6 +526,7 @@ class Configuracao:
     linhas_busca_cabecalho: int
     maquinas: dict[str, list[str]]
     turnos: dict[str, list[str]]
+    status: dict[str, list[str]]
     validacao: dict[str, Any]
     metas: dict[str, float]
     metas_produtividade: dict[str, float]
@@ -405,6 +633,7 @@ def carregar(arquivo: Path | str = CONFIG_PADRAO) -> Configuracao:
         linhas_busca_cabecalho=dados["linhas_busca_cabecalho"],
         maquinas=dados["maquinas"],
         turnos=dados["turnos"],
+        status=dados["status"],
         validacao=dados["validacao"],
         metas=dados["metas"],
         metas_produtividade=dados["metas_produtividade"],
@@ -445,16 +674,59 @@ def descrever(cfg: Configuracao) -> str:
 
     linhas.append("")
     linhas.append(f"Maquinas canonicas ({len(cfg.maquinas)})")
-    linhas.append(f"  {'nome':<26} {'meta folhas/h':>14}  variantes")
+    linhas.append(
+        f"  {'nome':<22} {'meta folhas/h':>13} {'setup min':>11} {'refugo %':>11}  tipo"
+    )
+    digitais = cfg.gerador["maquinas_digitais"]
     for nome, variantes in cfg.maquinas.items():
-        # A validacao ja garantiu que toda maquina canonica tem meta.
+        # A validacao ja garantiu que toda maquina canonica tem meta e faixas.
         meta = f"{cfg.metas_produtividade[nome]:,.0f}".replace(",", ".")
-        linhas.append(f"  {nome:<26} {meta:>14}  {len(variantes)}")
+        setup = cfg.gerador["setup_por_maquina"][nome]
+        refugo = cfg.gerador["refugo_por_maquina"][nome]
+        tipo = "digital" if nome in digitais else "offset"
+        linhas.append(
+            f"  {nome:<22} {meta:>13} {f'{setup[0]}-{setup[1]}':>11} "
+            f"{f'{refugo[0]}-{refugo[1]}':>11}  {tipo} ({len(variantes)} variantes)"
+        )
+
+    linhas.append("")
+    linhas.append(f"Tiragem por produto ({len(cfg.gerador['tiragem_por_produto'])}), em folhas")
+    for produto, (minimo, maximo) in cfg.gerador["tiragem_por_produto"].items():
+        linhas.append(f"  {produto:<40} {minimo:>7} a {maximo:>7}")
 
     linhas.append("")
     linhas.append(f"Turnos canonicos ({len(cfg.turnos)})")
     for nome, variantes in cfg.turnos.items():
         linhas.append(f"  {nome:<26} <- {', '.join(variantes)}")
+
+    linhas.append("")
+    linhas.append(f"Status canonicos ({len(cfg.status)})")
+    for nome, variantes in cfg.status.items():
+        linhas.append(f"  {nome:<26} <- {', '.join(variantes)}")
+
+    atrasos = cfg.gerador["atrasos"]
+    concentracao = atrasos["concentracao"]
+    linhas.append("")
+    linhas.append("Gerador: atrasos e fechamento")
+    linhas.append(f"  OTD alvo do historico: {atrasos['otd_alvo_pct']}%")
+    linhas.append(
+        f"  concentracao: {concentracao['maquina']} em {concentracao['mes']} "
+        f"com OTD {concentracao['otd_pct']}%"
+    )
+    linhas.append(
+        f"  atraso de {atrasos['dias_atraso'][0]} a {atrasos['dias_atraso'][1]} dias "
+        f"alem do prazo"
+    )
+    fechamento = cfg.gerador["fechamento_tiragem"]
+    linhas.append(
+        f"  sobra de ate {fechamento['sobra_maxima_pct']}%, "
+        f"{fechamento['prob_abaixo_do_pedido']:.0%} das ordens fecham abaixo "
+        f"(falta de ate {fechamento['falta_maxima_pct']}%)"
+    )
+    linhas.append(
+        f"  digital ate {cfg.gerador['tiragem_maxima_digital']} folhas, "
+        f"peso {cfg.gerador['peso_digital_tiragem_curta']}x na tiragem curta"
+    )
 
     linhas.append("")
     linhas.append("Validacao")
@@ -472,7 +744,7 @@ def descrever(cfg: Configuracao) -> str:
     linhas.append("")
     linhas.append("Metas")
     for nome, valor in cfg.metas.items():
-        linhas.append(f"  {nome:<26} {valor}")
+        linhas.append(f"  {nome:<28} {valor}")
 
     linhas.append("")
     linhas.append("Painel")
