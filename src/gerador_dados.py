@@ -34,17 +34,10 @@ from src.config import (
     ErroConfiguracao,
     carregar,
 )
-
-# Origem do sistema de datas do Excel de 1900, padrao no Windows. A base e
-# 30/12/1899 e nao 31/12/1899 porque o Excel conta 1900 como bissexto - um bug
-# de compatibilidade que nunca foi corrigido. Confere com as ancoras conhecidas
-# (2000-01-01 = 36526, 2024-01-01 = 45292).
-BASE_SERIAL_EXCEL = date(1899, 12, 30)
-
-MESES_ABREV = (
-    "jan", "fev", "mar", "abr", "mai", "jun",
-    "jul", "ago", "set", "out", "nov", "dez",
-)
+# A base do serial e a tabela de meses moram na limpeza, que e quem precisa
+# le-los de volta. O gerador so escreve, entao importa de la em vez de manter
+# uma segunda copia que sairia de sincronia na primeira correcao.
+from src.limpeza import BASE_SERIAL_EXCEL, MESES_ABREV
 
 # Fim da janela de historico. Fixo de proposito: ancorar em date.today() faria a
 # mesma semente produzir datas diferentes a cada dia. Pode ser trocado por --fim.
