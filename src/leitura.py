@@ -34,10 +34,6 @@ from src.config import (
     carregar,
 )
 
-# Primeira celula de uma linha de somatorio no rodape. Nao vem do config porque
-# nao e parametro de processo: e o vocabulario do Excel, igual em toda planilha.
-MARCADORES_RODAPE = ("TOTAL", "TOTAIS", "SUBTOTAL", "SOMA", "SOMATORIO")
-
 # Colunas de rastreio acrescentadas a cada linha lida. Sem elas o relatorio de
 # qualidade nao consegue apontar 'arquivo X, linha 47'.
 COLUNA_ARQUIVO = "arquivo_origem"
@@ -166,16 +162,22 @@ def encontrar_cabecalho(
     return melhor_linha, melhor_mapa
 
 
-def _e_rodape(valores: dict[str, Any]) -> bool:
+def _e_rodape(valores: dict[str, Any], marcadores: set[str]) -> bool:
     """
     Diz se a linha e somatorio de rodape, e nao uma ordem de producao.
 
-    O criterio e a celula de texto que abre a linha ser um marcador conhecido.
-    Nao basta 'nao tem numero de OS': linha com OS vazia e sujeira proposital e
-    tem que chegar na validacao para virar ocorrencia no relatorio.
+    O criterio e uma celula qualquer da linha ser, inteira, um marcador de
+    'marcadores_rodape'. A comparacao e com a celula toda e nunca por trecho:
+    um produto chamado 'Talao geral' nao pode virar rodape por conter 'GERAL'.
+
+    Procura em todas as colunas porque o rotulo do somatorio nem sempre abre a
+    linha. Isso deixa uma janela: um marcador que tambem seja valor legitimo de
+    alguma celula derrubaria a linha. Nao e silencioso - todo descarte vai para
+    a lista com o conteudo da linha - mas e razao para nao poluir
+    'marcadores_rodape' com palavra comum.
     """
     for valor in valores.values():
-        if isinstance(valor, str) and valor.strip().upper() in MARCADORES_RODAPE:
+        if isinstance(valor, str) and normalizar_cabecalho(valor) in marcadores:
             return True
     return False
 
@@ -240,6 +242,8 @@ def ler_arquivo(
     if ignoradas:
         resultado.colunas_ignoradas[caminho.name] = ignoradas
 
+    marcadores = {normalizar_cabecalho(m) for m in cfg.marcadores_rodape}
+
     linhas: list[dict[str, Any]] = []
     for indice in range(linha_cabecalho + 1, len(bruto)):
         linha_planilha = indice + 1
@@ -254,7 +258,7 @@ def ler_arquivo(
             )
             continue
 
-        if _e_rodape(valores):
+        if _e_rodape(valores, marcadores):
             resultado.descartes.append(
                 Descarte(
                     caminho.name, linha_planilha, MOTIVO_RODAPE, _resumir_linha(valores)

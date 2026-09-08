@@ -96,6 +96,7 @@ CHAVES_OBRIGATORIAS: tuple[tuple[str, tuple[type, ...]], ...] = (
     ("colunas.tempo_producao_min", (list,)),
 
     ("linhas_busca_cabecalho", (int,)),
+    ("marcadores_rodape", (list,)),
 
     ("maquinas", (dict,)),
     ("turnos", (dict,)),
@@ -309,6 +310,15 @@ def _validar_cruzamentos(dados: dict) -> list[str]:
             f"chave 'validacao.obrigatorios': {campo!r} nao existe em 'colunas'. "
             f"Disponiveis: {', '.join(sorted(dados['colunas']))}"
         )
+
+    # Marcador vazio ou so com espaco casaria com toda celula em branco e a
+    # leitura descartaria a planilha inteira como rodape.
+    for indice, marcador in enumerate(dados["marcadores_rodape"]):
+        if not isinstance(marcador, str) or not marcador.strip():
+            problemas.append(
+                f"chave 'marcadores_rodape': item {indice} e {marcador!r}. "
+                f"Cada marcador precisa ser um texto com conteudo"
+            )
 
     # O mesmo apelido em duas colunas deixa a leitura sem criterio para decidir
     # de quem e a coluna 'TIRAGEM' da planilha. Escolher uma seria arbitrario e
@@ -524,6 +534,7 @@ class Configuracao:
     gerador: dict[str, Any]
     colunas: dict[str, list[str]]
     linhas_busca_cabecalho: int
+    marcadores_rodape: list[str]
     maquinas: dict[str, list[str]]
     turnos: dict[str, list[str]]
     status: dict[str, list[str]]
@@ -631,6 +642,7 @@ def carregar(arquivo: Path | str = CONFIG_PADRAO) -> Configuracao:
         gerador=dados["gerador"],
         colunas=dados["colunas"],
         linhas_busca_cabecalho=dados["linhas_busca_cabecalho"],
+        marcadores_rodape=dados["marcadores_rodape"],
         maquinas=dados["maquinas"],
         turnos=dados["turnos"],
         status=dados["status"],
@@ -671,6 +683,11 @@ def descrever(cfg: Configuracao) -> str:
     ]
     for campo, apelidos in cfg.colunas.items():
         linhas.append(f"  {campo:<20} <- {', '.join(apelidos)}")
+
+    linhas.append("")
+    linhas.append("Leitura")
+    linhas.append(f"  linhas de busca do cabecalho: {cfg.linhas_busca_cabecalho}")
+    linhas.append(f"  marcadores de rodape: {', '.join(cfg.marcadores_rodape)}")
 
     linhas.append("")
     linhas.append(f"Maquinas canonicas ({len(cfg.maquinas)})")

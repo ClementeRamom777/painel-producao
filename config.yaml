@@ -159,6 +159,21 @@ colunas:
 
 linhas_busca_cabecalho: 12
 
+# Rotulos que identificam uma linha de somatorio no rodape - linha que nao e
+# ordem de producao. E vocabulario de quem exporta a planilha, e muda por ERP e
+# por empresa: rodando esta ferramenta em outra grafica, seria a primeira coisa
+# a divergir. A comparacao e com a celula inteira, em maiuscula e com espaco
+# normalizado, nunca por trecho.
+marcadores_rodape:
+  - "TOTAL"
+  - "TOTAL GERAL"
+  - "TOTAIS"
+  - "SUBTOTAL"
+  - "SOMA"
+  - "SOMATORIO"
+  - "ACUMULADO"
+  - "GERAL"
+
 # ---------------------------------------------------------------
 # Normalizacao de nomes de maquina
 # chave = nome canonico | valores = variantes do chao de fabrica
