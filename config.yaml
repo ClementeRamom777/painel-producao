@@ -225,15 +225,19 @@ metas:
   # informacao sobre o parque de maquinas, nao defeito do indicador.
   setup_maximo_min: 40.0
 
-  # 65 e nao 80: com tiragem curta o acerto compete com a producao. Job mediano
-  # de 4.800 folhas roda em ~29 minutos contra 30-40 de acerto. Oitenta por
-  # cento e meta de embalagem com tiragem de 50 mil, nao de grafica comercial.
-  aproveitamento_minimo_pct: 65.0
+  # 50 e nao 65: com tiragem curta o acerto compete com a producao. Job mediano
+  # de 4.800 folhas roda em ~29 minutos contra 30-40 de acerto, o que da ~45%.
+  # A meta anterior de 65 contradizia essa propria conta e deixava o cartao
+  # vermelho sem diagnostico nenhum. Oitenta por cento e meta de embalagem com
+  # tiragem de 50 mil, nao de grafica comercial.
+  aproveitamento_minimo_pct: 50.0
 
-  # 75 e nao 80: com quatro maquinas os valores possiveis sao 0, 25, 50, 75 e
-  # 100. Oitenta seria uma forma disfarcada de exigir 100%. 75 e "tres de
-  # quatro", que era a intencao.
-  maquinas_na_meta_minimo_pct: 75.0
+  # 50 e nao 75: com quatro maquinas os valores possiveis sao 0, 25, 50, 75 e
+  # 100, e o gerador sorteia a velocidade de cada maquina em volta da propria
+  # meta - metade fica abaixo por construcao. Exigir 75 era exigir que o dado
+  # sintetico desmentisse o mecanismo que o produz. A secao 4.4 registra a
+  # circularidade e a resolucao grosseira deste indicador.
+  maquinas_na_meta_minimo_pct: 50.0
 
 # Meta de produtividade por maquina, em folhas boas por hora.
 # Serve para comparar a MESMA maquina ao longo do tempo.
@@ -248,7 +252,10 @@ metas_produtividade:
 # Painel
 # ---------------------------------------------------------------
 painel:
-  titulo: "Painel de Producao Industrial"
+  # Com acento: este texto vai para o <title> e o <h1> do HTML, nao para o
+  # terminal. A regra de escrever sem acentuacao existe por causa da codificacao
+  # do console do PowerShell, e nao se aplica a pagina.
+  titulo: "Painel de Produção Industrial"
   arquivo: "painel.html"
   cores:
     fundo: "#060a0c"

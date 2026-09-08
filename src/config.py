@@ -507,15 +507,6 @@ def _validar_valores(dados: dict) -> list[str]:
     """Junta as conferencias de valor: escalares soltos, faixas e cruzamentos."""
     return _validar_escalares(dados) + _validar_cruzamentos(dados)
 
-    # As colunas marcadas como obrigatorias na validacao precisam ser colunas
-    # que a leitura conhece, senao a regra nunca dispara e ninguem descobre.
-    colunas_conhecidas = set(dados["colunas"].keys())
-    for campo in dados["validacao"]["obrigatorios"]:
-        if campo not in colunas_conhecidas:
-            problemas.append(
-                f"chave 'validacao.obrigatorios': {campo!r} nao existe em 'colunas'. "
-                f"Disponiveis: {', '.join(sorted(colunas_conhecidas))}"
-            )
 
 @dataclass(frozen=True)
 class Configuracao:

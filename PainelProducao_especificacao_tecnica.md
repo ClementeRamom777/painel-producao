@@ -396,6 +396,38 @@ Duas consequências diretas dessa escolha:
 
 
 
+\*\*A célula ilegível rejeita a ordem inteira.\*\* Quando um valor não pode ser convertido — nome de máquina que não casa com nenhum sinônimo, turno digitado `4`, data `31/02/2026` — a linha inteira vai para as rejeitadas, não só aquela célula.
+
+
+
+\*\*Alternativa descartada:\*\* gravar a ordem com a célula em branco e tratar o valor desconhecido como um membro explícito da dimensão, `(não informado)`. É o padrão em BI, e a vantagem é justamente a que falta na rejeição: o total permanece coerente com os cortes — a soma por turno continua batendo com o total geral — e o desconhecido aparece na tela como a categoria que ele é, em vez de sumir.
+
+
+
+Não foi adotada por custo sobre uso. Nenhuma das rejeições do histórico atual vem de valor ilegível; a alternativa acrescentaria um membro em cada dimensão, uma decisão de exibição em cada gráfico e um caminho a mais na gravação, tudo para um caso que hoje não ocorre. Rejeitar mantém um denominador só, e o relatório de qualidade nomeia a célula que causou.
+
+
+
+O custo é real e é este: uma planilha que passe a trazer um turno ainda não declarado no `config.yaml` perde as ordens inteiras, em vez de perder apenas o agrupamento por turno. O sintoma aparece na taxa de rejeição, não em silêncio — mas quem operar o sistema precisa saber que a resposta certa nesse caso é declarar o turno no `config.yaml`, não afrouxar a regra. Se um dia o valor ilegível deixar de ser hipótese e virar rotina, é esta decisão que se inverte.
+
+
+
+\*\*O indicador "máquinas na meta" é circular no dado sintético.\*\* `metas\_produtividade` é ao mesmo tempo o alvo que o painel compara e o centro em torno do qual o gerador sorteia a velocidade real de cada máquina. Com `uniform(0.80, 1.20)` da própria meta, metade das máquinas fica abaixo \*\*por construção\*\*: o indicador orbita 50% porque o dado nasceu assim, não porque a fábrica está assim.
+
+
+
+Em dado real esse indicador teria valor de diagnóstico — diria quantos equipamentos estão fora do esperado e mereceriam investigação. Aqui ele demonstra o mecanismo do painel, não o estado de um parque. É a diferença entre um número que informa e um número que apenas funciona, e quem apresenta o projeto precisa saber qual dos dois está mostrando.
+
+
+
+\*\*A resolução do indicador é grosseira com quatro máquinas.\*\* "Percentual na meta" só pode assumir 0, 25, 50, 75 ou 100 — um único equipamento move 25 pontos, e não existe valor entre dois degraus. Qualquer meta que não caia exatamente num degrau é, na prática, a exigência do degrau seguinte.
+
+
+
+O indicador melhora sozinho conforme o parque cresce: com dez máquinas o passo cai para 10 pontos, com vinte para 5. Não é defeito da fórmula, é o tamanho da amostra — mas é a razão de a meta estar em 50 e não num número mais ambicioso que soaria melhor e significaria menos.
+
+
+
 Esta seção deve estar no README como limitação conhecida. Saber dizer o que a simplificação custa vale mais que o modelo perfeito sem explicação.
 
 
@@ -860,11 +892,27 @@ Separa o DataFrame em aprovadas e rejeitadas, monta o relatório de qualidade e 
 
 7\. \*\*Limitações conhecidas do modelo\*\* — a seção 4.4, sobre o apontamento por etapa e o que a simplificação custa.
 
-8\. \*\*Declaração de uso de IA\*\*, texto padrão obrigatório:
+8\. \*\*Declaração de uso de IA\*\* — obrigatória, e precisa descrever o que de fato aconteceu.
+
+
+
+&#x20;  Quando o ciclo de reescrita à mão e revisão bloco a bloco tiver sido cumprido, o texto padrão é:
 
 
 
 &#x20;  > Código inicial gerado com IA (Claude Code), depois reescrito à mão e revisado bloco a bloco até eu conseguir explicar cada parte sem consultar. As decisões de design foram minhas.
+
+
+
+&#x20;  Quando não tiver sido, a declaração diz \*\*o que foi feito, o que ainda não foi, e condiciona a publicação a isso\*\*.
+
+
+
+&#x20;  \*\*A regra é a honestidade da declaração; o texto padrão é a forma dela no caso em que o ciclo está completo.\*\* Um texto fixo que afirme um processo que não ocorreu é a única parte do README que o leitor não tem como conferir sozinho — e é justamente por isso que ela não pode ser a parte que mente.
+
+
+
+&#x20;  \*\*O README deste projeto usa a segunda forma.\*\* A especificação foi escrita antes da primeira linha de código e a construção foi revisada e aprovada bloco a bloco, mas a reescrita à mão, módulo por módulo, ainda não aconteceu. Enquanto ela não acontecer, o texto padrão seria falso, e o repositório permanece privado — que é a condição que a própria declaração estabelece.
 
 
 

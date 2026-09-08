@@ -34,20 +34,22 @@ from src.config import (
     ErroConfiguracao,
     carregar,
 )
-# A base do serial e a tabela de meses moram na limpeza, que e quem precisa
-# le-los de volta. O gerador so escreve, entao importa de la em vez de manter
-# uma segunda copia que sairia de sincronia na primeira correcao.
-from src.limpeza import BASE_SERIAL_EXCEL, MESES_ABREV
+# A base do serial, a tabela de meses e os nomes canonicos de status moram na
+# limpeza, que e quem precisa le-los de volta. O gerador so escreve, entao
+# importa de la em vez de manter uma segunda copia que sairia de sincronia na
+# primeira correcao. Os tres status precisam existir na secao 'status' do
+# config.yaml - gerar() confere antes de comecar.
+from src.limpeza import (
+    BASE_SERIAL_EXCEL,
+    MESES_ABREV,
+    STATUS_CANCELADA,
+    STATUS_EM_PRODUCAO,
+    STATUS_ENTREGUE,
+)
 
 # Fim da janela de historico. Fixo de proposito: ancorar em date.today() faria a
 # mesma semente produzir datas diferentes a cada dia. Pode ser trocado por --fim.
 DATA_FIM_PADRAO = date(2026, 6, 30)
-
-# Status que o gerador sabe produzir. Sao nomes canonicos e precisam existir na
-# secao 'status' do config.yaml - gerar() confere antes de comecar.
-STATUS_EM_PRODUCAO = "EM PRODUCAO"
-STATUS_ENTREGUE = "ENTREGUE"
-STATUS_CANCELADA = "CANCELADA"
 
 # Botoes de realismo que nao viraram config por serem do gerador, nao do chao de
 # fabrica. Velocidade, setup, refugo, tiragem e atraso todos saem do config.yaml.
@@ -127,6 +129,7 @@ class ResumoGeracao:
     linhas_por_arquivo: dict[str, int] = field(default_factory=dict)
     ordens_limpas: int = 0
     sujeiras: dict[str, int] = field(default_factory=dict)
+    sujeiras_sem_efeito: dict[str, int] = field(default_factory=dict)
     arquivos_preexistentes: list[Path] = field(default_factory=list)
     por_status: dict[str, int] = field(default_factory=dict)
     otd_por_mes: dict[str, tuple[int, int]] = field(default_factory=dict)
@@ -135,6 +138,17 @@ class ResumoGeracao:
 
     def contar(self, sujeira: str) -> None:
         self.sujeiras[sujeira] = self.sujeiras.get(sujeira, 0) + 1
+
+    def contar_sem_efeito(self, sujeira: str) -> None:
+        """
+        Registra a sujeira sorteada que nao mudou a celula.
+
+        Nao vira sorteio novo de proposito: repetir o sorteio consumiria numeros
+        diferentes do gerador e a mesma semente passaria a produzir outro
+        historico, invalidando os numeros de OTD e refugo ja conferidos. A
+        tentativa perdida fica visivel aqui em vez de inflar 'sujeiras'.
+        """
+        self.sujeiras_sem_efeito[sujeira] = self.sujeiras_sem_efeito.get(sujeira, 0) + 1
 
 
 # ---------------------------------------------------------------------------
@@ -618,6 +632,13 @@ def sujar_linhas(
     Cada linha sorteada recebe um tipo de sujeira. Uma linha so recebe uma:
     assim a contagem por tipo no resumo corresponde ao que esta na planilha, e
     da para conferir a olho.
+
+    A contagem e feita DEPOIS de escrever, comparando a celula com o valor
+    original. Nem toda sujeira sorteada suja: 'entregue'.upper() e o proprio
+    nome canonico 'ENTREGUE', e negar o tempo de uma ordem cancelada da -0.0,
+    que a planilha grava como zero. Contar no sorteio fazia o resumo prometer
+    sujeira que nao esta no arquivo, e o pipeline levava a culpa por nao
+    encontra-la.
     """
     taxa = cfg.gerador["taxa_sujeira"]
     linhas: list[dict[str, Any]] = []
@@ -629,6 +650,7 @@ def sujar_linhas(
             linhas.append(celulas)
             continue
 
+        antes = dict(celulas)
         sujeira = rng.choice(SUJEIRAS_POR_LINHA)
         if sujeira == SUJEIRA_MAQUINA:
             _sujar_maquina(celulas, cfg, rng)
@@ -648,13 +670,20 @@ def sujar_linhas(
             _sujar_status_incoerente(celulas, rng)
 
         linhas.append(celulas)
-        resumo.contar(sujeira)
 
         if sujeira == SUJEIRA_DUPLICADA:
             # A mesma OS apontada duas vezes, uma logo abaixo da outra - o que
             # acontece quando o operador clica salvar duas vezes. Copia exata:
             # o hash da linha vai ser o mesmo e o Bloco 6 tem que deduplicar.
+            #
+            # E a unica sujeira que nao esta numa celula, e sim na linha a mais.
+            # Por isso ela e contada aqui, e nao pela comparacao com 'antes'.
             linhas.append(dict(celulas))
+            resumo.contar(sujeira)
+        elif celulas != antes:
+            resumo.contar(sujeira)
+        else:
+            resumo.contar_sem_efeito(sujeira)
 
     return linhas
 
@@ -918,11 +947,22 @@ def descrever_resumo(resumo: ResumoGeracao, cfg: Configuracao, destino: Path) ->
     linhas.append(f"  {'TOTAL':<34} {total_linhas} linhas")
 
     linhas.append("")
-    linhas.append("Sujeira injetada")
+    linhas.append("Sujeira injetada (conferida na celula depois de escrita)")
     for sujeira in SUJEIRAS_POR_LINHA + (SUJEIRA_CABECALHO, SUJEIRA_RODAPE):
         quantas = resumo.sujeiras.get(sujeira, 0)
         marca = " " if quantas else "!"
-        linhas.append(f" {marca} {sujeira:<34} {quantas}")
+        sem_efeito = resumo.sujeiras_sem_efeito.get(sujeira, 0)
+        nota = f"   ({sem_efeito} sorteada(s) sem efeito)" if sem_efeito else ""
+        linhas.append(f" {marca} {sujeira:<34} {quantas}{nota}")
+
+    total_sem_efeito = sum(resumo.sujeiras_sem_efeito.values())
+    if total_sem_efeito:
+        linhas.append("")
+        linhas.append(
+            f"  {total_sem_efeito} sorteio(s) de sujeira nao mudaram a celula e por isso "
+            f"nao entram na contagem acima. E esperado: a variante sorteada pode ser o "
+            f"proprio valor canonico."
+        )
 
     ausentes = [s for s in SUJEIRAS_POR_LINHA if not resumo.sujeiras.get(s)]
     if ausentes:

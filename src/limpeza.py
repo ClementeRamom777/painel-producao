@@ -74,6 +74,19 @@ TIPO_NUMERICO_POR_COLUNA: dict[str, type] = {
     "tempo_producao_min": float,
 }
 
+# Status que o pipeline conhece pelo SIGNIFICADO, nao so pelo nome: o gerador
+# precisa saber qual deles nao produz folha, e a validacao precisa saber qual
+# deles exige data de entrega. Ficam aqui pelo mesmo motivo de
+# TIPO_NUMERICO_POR_COLUNA - sao contrato entre os modulos, e duas copias sairiam
+# de sincronia na primeira renomeacao.
+#
+# O nome esta cravado, o vocabulario nao: quem digita 'Ok' ou 'em produção' e
+# reconhecido pelas variantes da secao 'status' do config.yaml. Cada modulo que
+# usa estas constantes confere antes de rodar que elas existem la.
+STATUS_EM_PRODUCAO = "EM PRODUCAO"
+STATUS_ENTREGUE = "ENTREGUE"
+STATUS_CANCELADA = "CANCELADA"
+
 
 @dataclass(frozen=True)
 class ValorLimpo:
