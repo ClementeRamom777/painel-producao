@@ -112,6 +112,20 @@ Nomes de coluna, sinônimos de máquina, limites de validação e metas de KPI f
 
 
 
+\*\*Configuração externa exige validação de coerência, senão vira armadilha.\*\* Tirar um valor do código não basta: é preciso recusar a combinação de valores que não faz sentido. Dois exemplos que `src/config.py` implementa:
+
+
+
+\- Toda máquina em `maquinas` precisa ter entrada em `metas_produtividade`, `setup_por_maquina` e `refugo_por_maquina` — e vice-versa. Um nome canônico digitado diferente numa das seções nunca alcançaria máquina nenhuma, e o efeito seria silencioso: a máquina simplesmente sairia do painel.
+
+\- Se \*\*todas\*\* as máquinas estiverem em `maquinas_digitais`, nenhuma tiragem acima de `tiragem_maxima_digital` teria onde rodar. O YAML é válido, cada chave está lá, e o programa só quebraria muito depois. O carregamento recusa com o número de máquinas digitais e o total.
+
+
+
+O critério é: se uma combinação de valores válidos produz \*\*silêncio\*\* em vez de erro, ela precisa ser recusada no carregamento, com código de saída 2.
+
+
+
 \### Decisão 2 — Falha visível, nunca silenciosa
 
 
@@ -192,7 +206,9 @@ Uma linha = uma ordem de produção apontada.
 
 | `PRAZO` | Data prometida ao cliente | data |
 
-| `DATA ENTREGA` | Quando saiu (vazio = em produção) | data ou vazio |
+| `DATA ENTREGA` | Quando saiu (vazio quando o status não é `ENTREGUE`) | data ou vazio |
+
+| `STATUS` | `EM PRODUCAO`, `ENTREGUE` ou `CANCELADA` | texto (normalizar) |
 
 | `TIRAGEM PREVISTA` | Quantidade pedida | inteiro |
 
@@ -220,11 +236,11 @@ O gerador recebe uma taxa de sujeira em `config.yaml` e aplica:
 
 1\. \*\*Nome de máquina em variantes\*\* — `Heidelberg SM52`, `heidelberg sm-52`, `HEIDELBERG  SM 52 `, `Heid SM52`.
 
-2\. \*\*Datas em quatro formatos\*\* — `05/03/2026`, `2026-03-05`, `5-mar-26`, e serial do Excel (`46083`).
+2\. \*\*Datas em quatro formatos\*\* — `05/03/2026`, `2026-03-05`, `5-mar-26`, e serial do Excel (`46086`).
 
 3\. \*\*Números como texto\*\* — `5.000`, `5 000`, `5000,0`.
 
-4\. \*\*Células vazias\*\* — em campos opcionais (data de entrega) e obrigatórios (tiragem boa).
+4\. \*\*Células vazias\*\* — nos campos obrigatórios de `validacao.obrigatorios`.
 
 5\. \*\*Linhas duplicadas\*\* — a mesma OS apontada duas vezes.
 
@@ -235,6 +251,14 @@ O gerador recebe uma taxa de sujeira em `config.yaml` e aplica:
 8\. \*\*Lixo no rodapé\*\* — linhas em branco e uma linha `TOTAL` com somatórios.
 
 9\. \*\*Espaço sobrando\*\* em todo campo de texto.
+
+10\. \*\*Status em variantes\*\* — `entregue`, `Ok`, `em produção`, `CANC`. Normalizado como o turno.
+
+11\. \*\*Status incoerente com a entrega\*\* — `ENTREGUE` sem data de entrega, ou `EM PRODUCAO` com data preenchida.
+
+
+
+> A ausência de data de entrega tem \*\*um significado só\*\*: a ordem não foi entregue. Por isso o gerador não esvazia esse campo ao acaso — vazio sem `STATUS` seria a única sujeira que o pipeline não teria como detectar, indistinguível de uma ordem legitimamente aberta.
 
 
 
@@ -281,6 +305,8 @@ CREATE TABLE IF NOT EXISTS ordem\_producao (
 &#x20;   data\_prazo         TEXT,
 
 &#x20;   data\_entrega       TEXT,
+
+&#x20;   status             TEXT    NOT NULL,
 
 &#x20;   tiragem\_prevista   INTEGER,
 
@@ -338,6 +364,42 @@ CREATE TABLE IF NOT EXISTS execucao\_importacao (
 
 
 
+\### 4.4 Limitações conhecidas do modelo
+
+
+
+\*\*Uma linha = uma ordem é uma simplificação consciente.\*\* Na prática, o apontamento de produção é \*\*por etapa\*\*: a ordem percorre um roteiro (impressão, dobra, corte) e cada etapa gera seu próprio apontamento, com a mesma OS aparecendo repetida na exportação. O modelo relacional correto seria \*\*cabeçalho e detalhe\*\* — uma tabela de ordens e uma tabela de apontamentos por etapa.
+
+
+
+Este projeto simplifica para uma linha por ordem, registrando apenas a \*\*etapa de impressão\*\*. É simplificação consciente: reduz o custo de modelagem e mantém os indicadores válidos por máquina de impressão, ao preço de \*\*não medir gargalo de acabamento\*\*.
+
+
+
+Duas consequências diretas dessa escolha:
+
+
+
+\- \*\*Equipamento de acabamento não entra na lista de máquinas.\*\* Guilhotina e dobradeira não produzem a ordem, fazem acabamento — e acabamento não é apontado neste modelo.
+
+\- \*\*A tiragem depende do produto\*\*, não da máquina. É o pedido do cliente que define o tamanho da tiragem; a máquina só determina em quanto tempo ela sai.
+
+\- \*\*A tiragem é sempre em folhas impressas, nunca em peças acabadas.\*\* Mil folhas SRA3 de cartão de visita são cerca de 21.000 peças. Quem lê o painel precisa saber qual das duas está vendo — e produtividade em folhas por hora só é comparável entre ordens medidas na mesma unidade.
+
+
+
+\*\*O último mês da janela sofre censura à direita.\*\* A ordem cuja entrega cairia depois da data de corte da exportação aparece como `EM PRODUCAO`, sem data de entrega. Isso não é neutro: \*\*atraso empurra a data de entrega para frente\*\*, então o corte remove seletivamente as ordens ruins. O último mês fica com menos ordens entregues e com um OTD artificialmente alto — no histórico gerado, junho aparece com 69 entregas contra 116–119 dos outros meses, e com o melhor OTD dos seis.
+
+
+
+É uma propriedade de qualquer exportação real, não um defeito do gerador. O tratamento é \*\*marcar, nunca esconder\*\*: o período incompleto vai para o painel com marcação visual e nota de rodapé explicando a censura. Remover o mês seria maquiar o resultado; deixá-lo sem marca seria mentir por omissão.
+
+
+
+Esta seção deve estar no README como limitação conhecida. Saber dizer o que a simplificação custa vale mais que o modelo perfeito sem explicação.
+
+
+
 \---
 
 
@@ -363,6 +425,10 @@ CREATE TABLE IF NOT EXISTS execucao\_importacao (
 
 
 Cada indicador é calculado no total, por máquina, por turno e por mês. As metas ficam em `config.yaml` — o painel pinta verde ou vermelho comparando com a meta.
+
+
+
+\*\*O agrupamento mensal é por coorte de entrada, não por data de entrega.\*\* A ordem conta no mês em que \*\*entrou\*\* em produção, não no mês em que saiu. O objetivo é atribuir o desempenho ao período em que a ordem foi assumida — e é o que mantém uma queda de OTD nítida no mês em que ela aconteceu, em vez de borrada entre dois meses, já que uma ordem que entra no fim de abril e atrasa é entregue em maio.
 
 
 
@@ -402,7 +468,7 @@ Estrutura da página:
 
 4\. Gráfico de barras: percentual de refugo por máquina, com linha da meta.
 
-5\. Gráfico de linha: evolução mensal do OTD.
+5\. Gráfico de linha: evolução mensal do OTD, por coorte de entrada, com o período incompleto marcado (seção 4.4).
 
 6\. Gráfico de barras horizontais: tempo médio de setup por máquina.
 
@@ -630,7 +696,7 @@ Criar a estrutura de pastas, `requirements.txt`, `.gitignore` e `src/config.py`.
 
 
 
-\*Aceite:\* abrir uma planilha gerada no Excel e enxergar as nove sujeiras da lista. Rodar duas vezes com a mesma semente gera arquivos idênticos.
+\*Aceite:\* abrir uma planilha gerada no Excel e enxergar as onze sujeiras da lista. Rodar duas vezes com a mesma semente gera o mesmo conteúdo — os bytes diferem porque o zip do `.xlsx` carimba a hora de gravação em cada entrada.
 
 
 
@@ -734,6 +800,10 @@ Separa o DataFrame em aprovadas e rejeitadas, monta o relatório de qualidade e 
 
 
 
+\*\*Requisito do período incompleto.\*\* O último mês da janela sofre censura à direita (seção 4.4). No gráfico de evolução mensal do OTD ele precisa aparecer com \*\*marcação visual\*\* — ponto vazado, traço pontilhado ou faixa sombreada — e com \*\*nota de rodapé\*\* dizendo que o período está incompleto e que o OTD dele é otimista, porque a ordem atrasada ainda não foi entregue e por isso não entra na conta. Marcar, nunca esconder.
+
+
+
 \*Aceite:\* abrir o arquivo com a internet desligada e ver tudo funcionando.
 
 
@@ -788,7 +858,9 @@ Separa o DataFrame em aprovadas e rejeitadas, monta o relatório de qualidade e 
 
 6\. \*\*O que o sistema não faz\*\* — a fronteira da seção 2.
 
-7\. \*\*Declaração de uso de IA\*\*, texto padrão obrigatório:
+7\. \*\*Limitações conhecidas do modelo\*\* — a seção 4.4, sobre o apontamento por etapa e o que a simplificação custa.
+
+8\. \*\*Declaração de uso de IA\*\*, texto padrão obrigatório:
 
 
 

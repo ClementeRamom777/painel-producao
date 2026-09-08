@@ -39,18 +39,19 @@ gerador:
     - "CLI-013"
     - "CLI-014"
 
-  # Produtos com especificacao, como aparece numa OS de verdade
+  # Produtos com especificacao, como aparece numa OS de verdade.
+  # So produto de folha: etiqueta em rolo e rotulo termoencolhivel sairam da
+  # lista porque nao rodam em plana nem em digital de folha, e contar rolo em
+  # folhas distorce a produtividade.
   produtos:
     - "Folder A4 4x4 couche 150g"
     - "Catalogo 16pg lombada canoa"
     - "Cartao de visita 4x4 laminado fosco"
-    - "Etiqueta adesiva BOPP em rolo"
     - "Caixa cartonada duplex 300g"
     - "Manual tecnico 32pg 1x1"
     - "Bloco de pedido 2 vias autocopiativo"
     - "Cartaz A2 4x0 couche 170g"
     - "Revista institucional 24pg"
-    - "Rotulo termoencolhivel"
     - "Pasta com bolsa 4x0 triplex"
     - "Talao de nota fiscal 3 vias"
 
@@ -67,6 +68,75 @@ gerador:
     - "OP-09"
     - "OP-10"
 
+  # Faixa de tiragem plausivel por produto, em FOLHAS IMPRESSAS.
+  # A unidade e sempre folha impressa, nunca peca acabada: 1.000 folhas SRA3 de
+  # cartao de visita sao cerca de 21.000 pecas. Quem le o painel precisa saber
+  # qual das duas esta vendo.
+  tiragem_por_produto:
+    "Folder A4 4x4 couche 150g":            [2000, 20000]
+    "Catalogo 16pg lombada canoa":          [1000,  8000]
+    "Cartao de visita 4x4 laminado fosco":  [ 200,  1500]
+    "Caixa cartonada duplex 300g":          [2000, 25000]
+    "Manual tecnico 32pg 1x1":              [ 500,  5000]
+    "Bloco de pedido 2 vias autocopiativo": [1000, 10000]
+    "Cartaz A2 4x0 couche 170g":            [ 500,  5000]
+    "Revista institucional 24pg":           [1000, 10000]
+    "Pasta com bolsa 4x0 triplex":          [1000, 10000]
+    "Talao de nota fiscal 3 vias":          [ 500,  5000]
+
+  # Roteamento digital x offset. A digital so pega tiragem curta; acima do
+  # limite a impressao vai para plana. O nome da maquina fica aqui e nao no
+  # codigo: trocar de digital nao pode exigir abrir Python.
+  maquinas_digitais: ["Xerox Versant 180"]
+  tiragem_maxima_digital: 2000
+  peso_digital_tiragem_curta: 3   # abaixo do limite, a digital e 3x mais provavel
+
+  # Acerto por maquina, em minutos. Nao sai de uma faixa global: acerto de
+  # digital e apertar imprimir, acerto de plana e trocar chapa e acertar
+  # registro. Derivar os dois da mesma meta deixava a Versant sortear o acerto
+  # mais longo da grafica.
+  setup_por_maquina:
+    "Heidelberg SM52":    [20, 45]
+    "Heidelberg SM74":    [25, 60]
+    "Komori Lithrone 28": [25, 55]
+    "Xerox Versant 180":  [ 2,  8]
+
+  # Refugo tipico por maquina, em percentual. Digital quase nao tem acerto de
+  # folha; plana perde folha ate o registro fechar.
+  refugo_por_maquina:
+    "Heidelberg SM52":    [1.5, 5.0]
+    "Heidelberg SM74":    [1.5, 5.5]
+    "Komori Lithrone 28": [1.2, 4.5]
+    "Xerox Versant 180":  [0.3, 1.5]
+
+  # Atraso de entrega. O alvo e o OTD do historico inteiro; a concentracao
+  # rebaixa uma maquina num mes, para o painel ter uma historia a revelar em
+  # vez de um ruido uniforme.
+  atrasos:
+    otd_alvo_pct: 88.0
+    dias_atraso: [1, 12]      # quanto uma ordem atrasada estoura o prazo
+    concentracao:
+      maquina: "Komori Lithrone 28"
+      mes: "2026-04"
+      otd_pct: 55.0
+
+  # Fechamento da tiragem. Producao real nao fecha exata: roda-se folha a mais
+  # para cobrir o acerto, entao a soma geralmente supera o pedido, e as vezes
+  # fica abaixo.
+  fechamento_tiragem:
+    sobra_maxima_pct: 6.0
+    prob_abaixo_do_pedido: 0.12
+    falta_maxima_pct: 4.0
+    # Zero por cento fechando exato e tao artificial quanto 100%: na pratica
+    # algumas ordens fecham na conta certa por coincidencia.
+    prob_exato: 0.04
+
+  # Situacao da ordem no momento da exportacao.
+  status:
+    dias_janela_em_producao: 15   # ordens recentes ainda podem estar abertas
+    prob_em_producao: 0.35        # dentro dessa janela
+    prob_cancelada: 0.03          # em qualquer ponto do historico
+
 # ---------------------------------------------------------------
 # Leitura: apelidos aceitos para cada coluna
 # ---------------------------------------------------------------
@@ -80,6 +150,7 @@ colunas:
   data_entrada:       ["DATA ENTRADA", "ENTRADA", "DT ENTRADA"]
   data_prazo:         ["PRAZO", "DATA PRAZO", "PREVISAO"]
   data_entrega:       ["DATA ENTREGA", "ENTREGA", "DT ENTREGA"]
+  status:             ["STATUS", "SITUACAO", "SIT"]
   tiragem_prevista:   ["TIRAGEM PREVISTA", "TIRAGEM", "QTD PREVISTA"]
   tiragem_boa:        ["TIRAGEM BOA", "QTD BOA", "PRODUZIDO"]
   refugo:             ["REFUGO", "PERDA", "SOBRA"]
@@ -101,15 +172,20 @@ maquinas:
     ["komori lithrone", "komori 28", "lithrone 28", "komori l28"]
   "Xerox Versant 180":
     ["xerox versant", "versant 180", "xerox 180", "versant"]
-  "Polar 115 (Guilhotina)":
-    ["polar 115", "guilhotina polar", "polar", "guilhotina"]
-  "Stahl KH66 (Dobradeira)":
-    ["stahl kh66", "dobradeira stahl", "stahl", "dobradeira"]
 
 turnos:
   "1": ["1", "1o", "primeiro", "manha", "a"]
   "2": ["2", "2o", "segundo", "tarde", "b"]
   "3": ["3", "3o", "terceiro", "noite", "c"]
+
+# Situacao da ordem. As variantes com acento sao de proposito: e o que o
+# operador digita. Obriga normalizar_texto a remover acento antes de comparar.
+# DATA ENTREGA vazia e legitima quando o status nao e ENTREGUE, e e
+# inconsistencia detectavel quando e.
+status:
+  "EM PRODUCAO": ["em producao", "em produção", "producao", "produção", "aberta", "em aberto", "wip"]
+  "ENTREGUE":    ["entregue", "finalizada", "concluida", "concluída", "ok"]
+  "CANCELADA":   ["cancelada", "cancelado", "canc", "anulada"]
 
 # ---------------------------------------------------------------
 # Validacao
@@ -126,9 +202,24 @@ validacao:
 metas:
   refugo_maximo_pct: 3.0
   otd_minimo_pct: 95.0
+
+  # O teto de acerto e GLOBAL de proposito, diferente da produtividade.
+  # "Nenhum acerto passa de 40 minutos" e um teto que a gerencia cobra igual de
+  # todo mundo. Folhas por hora, nao: so faz sentido comparada consigo mesma,
+  # por isso tem meta por maquina. A digital bater os 40 minutos com folga e
+  # informacao sobre o parque de maquinas, nao defeito do indicador.
   setup_maximo_min: 40.0
-  aproveitamento_minimo_pct: 80.0
-  maquinas_na_meta_minimo_pct: 80.0
+
+  # 65 e nao 80: com tiragem curta o acerto compete com a producao. Job mediano
+  # de 4.800 folhas roda em ~29 minutos contra 30-40 de acerto. Oitenta por
+  # cento e meta de embalagem com tiragem de 50 mil, nao de grafica comercial.
+  aproveitamento_minimo_pct: 65.0
+
+  # 75 e nao 80: com quatro maquinas os valores possiveis sao 0, 25, 50, 75 e
+  # 100. Oitenta seria uma forma disfarcada de exigir 100%. 75 e "tres de
+  # quatro", que era a intencao.
+  maquinas_na_meta_minimo_pct: 75.0
+
 # Meta de produtividade por maquina, em folhas boas por hora.
 # Serve para comparar a MESMA maquina ao longo do tempo.
 # Comparar maquinas diferentes entre si com este indicador nao e valido.
@@ -137,8 +228,6 @@ metas_produtividade:
   "Heidelberg SM74": 11000
   "Komori Lithrone 28": 12000
   "Xerox Versant 180": 4500
-  "Polar 115 (Guilhotina)": 20000
-  "Stahl KH66 (Dobradeira)": 8000
 
 # ---------------------------------------------------------------
 # Painel
