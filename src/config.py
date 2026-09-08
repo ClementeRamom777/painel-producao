@@ -83,6 +83,12 @@ CHAVES_OBRIGATORIAS: tuple[tuple[str, tuple[type, ...]], ...] = (
     ("metas.setup_maximo_min", (int, float)),
     ("metas.aproveitamento_minimo_pct", (int, float)),
 
+    # Meta de produtividade e por maquina, nao global: folha boa por hora nao
+    # e comparavel entre equipamentos de portes diferentes. As chaves sao os
+    # nomes canonicos de 'maquinas', entao o conteudo e conferido em
+    # _validar_valores, onde da para cruzar as duas secoes.
+    ("metas_produtividade", (dict,)),
+
     ("painel", (dict,)),
     ("painel.titulo", (str,)),
     ("painel.arquivo", (str,)),
@@ -237,6 +243,40 @@ def _validar_valores(dados: dict) -> list[str]:
                 f"Disponiveis: {', '.join(sorted(colunas_conhecidas))}"
             )
 
+    # Mesma logica de 'validacao.obrigatorios', agora entre 'maquinas' e
+    # 'metas_produtividade'. Os dois sentidos importam: maquina sem meta
+    # aparece no painel sem linha de comparacao, e meta com nome canonico
+    # digitado diferente nunca alcanca maquina nenhuma. Nos dois casos o
+    # painel fica incompleto sem avisar.
+    maquinas_canonicas = set(dados["maquinas"])
+    metas_produtividade = dados["metas_produtividade"]
+
+    for maquina in sorted(maquinas_canonicas - set(metas_produtividade), key=str):
+        problemas.append(
+            f"chave 'metas_produtividade': maquina {maquina!r} existe em 'maquinas' "
+            f"mas nao tem meta de produtividade"
+        )
+
+    for maquina in sorted(set(metas_produtividade) - maquinas_canonicas, key=str):
+        problemas.append(
+            f"chave 'metas_produtividade': meta definida para {maquina!r}, que nao e "
+            f"nome canonico em 'maquinas'. Canonicos: "
+            f"{', '.join(sorted(maquinas_canonicas, key=str))}"
+        )
+
+    for maquina, meta in metas_produtividade.items():
+        if not _tipo_aceito(meta, (int, float)):
+            problemas.append(
+                f"chave 'metas_produtividade.{maquina}': esperado "
+                f"{_nomes_tipos((int, float))}, veio {type(meta).__name__} "
+                f"com valor {meta!r}"
+            )
+        elif meta <= 0:
+            problemas.append(
+                f"chave 'metas_produtividade.{maquina}': valor {meta!r} precisa ser "
+                f"maior que zero (a meta e em folhas boas por hora)"
+            )
+
     return problemas
 
 
@@ -261,6 +301,7 @@ class Configuracao:
     turnos: dict[str, list[str]]
     validacao: dict[str, Any]
     metas: dict[str, float]
+    metas_produtividade: dict[str, float]
     painel: dict[str, Any]
 
     def caminho(self, chave: str) -> Path:
@@ -366,6 +407,7 @@ def carregar(arquivo: Path | str = CONFIG_PADRAO) -> Configuracao:
         turnos=dados["turnos"],
         validacao=dados["validacao"],
         metas=dados["metas"],
+        metas_produtividade=dados["metas_produtividade"],
         painel=dados["painel"],
     )
 
@@ -403,8 +445,11 @@ def descrever(cfg: Configuracao) -> str:
 
     linhas.append("")
     linhas.append(f"Maquinas canonicas ({len(cfg.maquinas)})")
+    linhas.append(f"  {'nome':<26} {'meta folhas/h':>14}  variantes")
     for nome, variantes in cfg.maquinas.items():
-        linhas.append(f"  {nome:<26} <- {len(variantes)} variantes")
+        # A validacao ja garantiu que toda maquina canonica tem meta.
+        meta = f"{cfg.metas_produtividade[nome]:,.0f}".replace(",", ".")
+        linhas.append(f"  {nome:<26} {meta:>14}  {len(variantes)}")
 
     linhas.append("")
     linhas.append(f"Turnos canonicos ({len(cfg.turnos)})")
